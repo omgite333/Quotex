@@ -1,7 +1,4 @@
-import RSI from 'technicalindicators/lib/rsi';
-import EMA from 'technicalindicators/lib/ema';
-import MACD from 'technicalindicators/lib/macd';
-import BollingerBands from 'technicalindicators/lib/bollingerbands';
+import { RSI, EMA, MACD, BollingerBands } from 'technicalindicators';
 import logger from '../logs/logger.js';
 
 export function calculateIndicators(candles) {
