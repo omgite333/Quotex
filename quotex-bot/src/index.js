@@ -10,7 +10,11 @@ import cron from 'node-cron';
 
 const CURRENCY = '₹'; // INR
 
-console.log('╔════════════════════════════════════════╗');
+console.log('Loading settings...');
+console.log('Email:', settings.quotex.email ? '✓ configured' : '✗ NOT SET');
+console.log('Password:', settings.quotex.password ? '✓ configured' : '✗ NOT SET');
+
+console.log('\n╔════════════════════════════════════════╗');
 console.log('║    AI Quotex Trading Bot v1.0           ║');
 console.log('╚════════════════════════════════════════╝\n');
 
