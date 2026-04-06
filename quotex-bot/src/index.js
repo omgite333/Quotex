@@ -8,6 +8,8 @@ import { validateSignal } from './ai/validator.js';
 import riskManager from './risk/manager.js';
 import cron from 'node-cron';
 
+const CURRENCY = '₹'; // INR
+
 console.log('╔════════════════════════════════════════╗');
 console.log('║    AI Quotex Trading Bot v1.0           ║');
 console.log('╚════════════════════════════════════════╝\n');
@@ -25,6 +27,7 @@ async function main() {
       console.log(`Mode:       ${settings.demo.enabled ? 'DEMO (Practice)' : 'LIVE'}`);
       console.log(`Interval:   Every ${settings.trading.interval} minute(s)`);
       console.log(`Asset:      ${this.currentAsset}`);
+      console.log(`Currency:   INR (${CURRENCY})`);
       console.log(`Min Confidence: ${settings.trading.minConfidence}%\n`);
       
       if (!settings.quotex.email || !settings.quotex.password) {
@@ -65,7 +68,7 @@ async function main() {
       
       console.log('\n' + '━'.repeat(40));
       console.log('✅ BOT INITIALIZED SUCCESSFULLY!\n');
-      console.log(`💰 Demo Balance: $${await this.trader.getBalance()}\n`);
+      console.log(`${CURRENCY} Demo Balance: ${CURRENCY}${(await this.trader.getBalance())}\n`);
       console.log('━'.repeat(40));
     },
 
@@ -133,7 +136,7 @@ async function main() {
         const balance = await this.trader.getBalance() || 10000;
         const amount = riskManager.getRecommendedAmount(balance, signal.confidence);
 
-        console.log(`💰 Balance: $${balance.toFixed(2)} | Amount: $${amount.toFixed(2)}`);
+        console.log(`${CURRENCY} Balance: ${CURRENCY}${balance} | Amount: ${CURRENCY}${amount}`);
         console.log(`🔄 Opening ${signal.direction} position...`);
 
         await this.trader.setTradeAmount(amount);
@@ -159,8 +162,8 @@ async function main() {
 
           const newStats = await History.getStats();
           const resultEmoji = result === 'WIN' ? '✅' : result === 'LOSS' ? '❌' : '⚠️';
-          console.log(`\n${resultEmoji} RESULT: ${result} | Payout: $${payout.toFixed(2)}`);
-          console.log(`📊 Win Rate: ${newStats.winRate} | Total P&L: $${newStats.totalProfit.toFixed(2)}`);
+          console.log(`\n${resultEmoji} RESULT: ${result} | Payout: ${CURRENCY}${payout.toFixed(2)}`);
+          console.log(`📊 Win Rate: ${newStats.winRate} | Total P&L: ${CURRENCY}${newStats.totalProfit.toFixed(2)}`);
         } else {
           console.log('❌ Trade placement failed');
         }

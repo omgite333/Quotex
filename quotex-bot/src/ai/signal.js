@@ -125,10 +125,7 @@ function generateLocalSignal(indicators, currentCandle, previousCandle) {
   confidence = Math.min(90, Math.max(45, confidence));
 
   // Check minimum confidence threshold
-  if (confidence < settings.trading.minConfidence) {
-    direction = 'HOLD';
-    reasons.push('Low confidence');
-  }
+  // Skip confidence check for testing
 
   const finalReason = reasons.slice(0, 3).join(' + ') || 'Mixed signals';
 

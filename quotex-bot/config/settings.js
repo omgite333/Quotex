@@ -10,7 +10,7 @@ export const settings = {
     url: 'https://qxbroker.com/en/sign-in'
   },
   trading: {
-    amount: parseFloat(process.env.TRADE_AMOUNT) || 1,
+    amount: parseFloat(process.env.TRADE_AMOUNT) || 500,
     expiry: parseInt(process.env.TRADE_EXPIRY) || 2,
     interval: parseInt(process.env.INTERVAL) || 2,
     minConfidence: parseInt(process.env.MIN_CONFIDENCE) || 55,

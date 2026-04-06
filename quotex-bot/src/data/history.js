@@ -5,7 +5,6 @@ import path from 'path';
 
 const dbPath = path.join(process.cwd(), 'data', 'trades.json');
 
-// Ensure data directory exists
 const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -57,6 +56,20 @@ class History {
 
   static async getStats() {
     const stats = db.data.stats;
+    
+    // Reset stats if it's a new day
+    const today = new Date().toDateString();
+    const lastTradeDate = db.data.trades.length > 0 
+      ? new Date(db.data.trades[db.data.trades.length - 1].timestamp).toDateString()
+      : null;
+    
+    if (lastTradeDate !== today) {
+      // New day - reset daily stats
+      stats.totalProfit = 0;
+      stats.consecutiveLosses = 0;
+      stats.consecutiveWins = 0;
+    }
+    
     return {
       ...stats,
       winRate: stats.totalTrades > 0 
@@ -67,6 +80,20 @@ class History {
 
   static async getRecentTrades(count = 20) {
     return db.data.trades.slice(-count);
+  }
+  
+  static async resetStats() {
+    db.data.stats = {
+      totalTrades: 0,
+      wins: 0,
+      losses: 0,
+      totalProfit: 0,
+      consecutiveWins: 0,
+      consecutiveLosses: 0
+    };
+    db.data.trades = [];
+    await db.write();
+    console.log('✅ Stats reset!');
   }
 }
 
