@@ -3,7 +3,7 @@ import { settings } from '../../config/settings.js';
 export class Trader {
   constructor(page) {
     this.page = page;
-    this.currency = '₹'; // INR symbol
+    this.currency = '₹';
   }
 
   sleep(ms) {
@@ -68,26 +68,29 @@ export class Trader {
   async setTradeAmount(amount) {
     try {
       console.log(`💰 Setting amount: ${this.currency}${amount}`);
-      await this.sleep(500);
+      await this.sleep(1000);
       
-      const inputSelectors = [
-        'input[class*="amount"]',
-        'input[class*="sum"]',
-        'input[class*="value"]',
-        'input[class*="invest"]',
-        'input[type="number"]'
-      ];
+      // Try to find all inputs and type in number inputs
+      const inputs = await this.page.$$('input');
+      console.log(`🔍 Found ${inputs.length} inputs`);
       
-      for (const sel of inputSelectors) {
+      for (const input of inputs) {
         try {
-          const input = await this.page.waitForSelector(sel, { timeout: 2000 });
-          if (input) {
+          const type = await input.evaluate(el => el.type);
+          const readonly = await input.evaluate(el => el.readOnly);
+          
+          if ((type === 'number' || type === 'text') && !readonly) {
             await input.click({ force: true });
-            await this.sleep(200);
+            await this.sleep(300);
+            
+            // Clear the input
             await this.page.keyboard.down('Control');
             await this.page.keyboard.press('a');
             await this.page.keyboard.up('Control');
             await this.page.keyboard.press('Backspace');
+            await this.sleep(200);
+            
+            // Type the amount
             await this.page.keyboard.type(String(amount), { delay: 50 });
             console.log(`✅ Amount set to ${this.currency}${amount}`);
             await this.sleep(500);
@@ -96,7 +99,33 @@ export class Trader {
         } catch {}
       }
       
-      console.log('⚠️  Amount input not found');
+      console.log('⚠️  Amount input not found - trying button clicks');
+      
+      // Try clicking decrease button to get to minimum
+      try {
+        const buttons = await this.page.$$('button');
+        for (const btn of buttons) {
+          const text = await btn.textContent();
+          if (text && (text.includes('-') || text.includes('−'))) {
+            await btn.click({ force: true });
+            await this.sleep(100);
+          }
+        }
+        
+        // Click increase until we reach desired amount
+        for (let i = 0; i < 5; i++) {
+          for (const btn of buttons) {
+            const text = await btn.textContent();
+            if (text && (text.includes('+') || text.includes('×'))) {
+              await btn.click({ force: true });
+              await this.sleep(100);
+            }
+          }
+        }
+        console.log('✅ Amount adjusted via buttons');
+        return true;
+      } catch {}
+      
       return true;
     } catch (error) {
       console.error('❌ Set amount:', error.message);
@@ -116,56 +145,80 @@ export class Trader {
 
   async placeTrade(direction) {
     try {
-      console.log(`🔄 Placing ${direction} trade...`);
+      console.log(`🔄 Searching for ${direction} button...`);
       await this.sleep(1000);
       
-      const upSelectors = [
-        '[class*="up"]:not([class*="down"])',
-        '[class*="call"]',
-        '[class*="green"]',
-        '[class*="rise"]'
-      ];
+      // Take screenshot before clicking to debug
+      await this.page.screenshot({ path: 'before-trade.png' }).catch(() => {});
       
-      const downSelectors = [
-        '[class*="down"]',
-        '[class*="put"]',
-        '[class*="red"]',
-        '[class*="fall"]'
-      ];
+      // List all buttons on the page
+      const buttons = await this.page.$$('button');
+      console.log(`🔍 Found ${buttons.length} buttons on page`);
       
-      const selectors = direction === 'UP' ? upSelectors : downSelectors;
-      
-      for (const sel of selectors) {
+      // Try to find the trade button by text
+      let found = false;
+      for (const btn of buttons) {
         try {
-          const btn = await this.page.waitForSelector(sel, { timeout: 3000 });
-          if (btn) {
-            const visible = await btn.isVisible();
-            if (visible) {
+          const text = await btn.textContent();
+          const className = await btn.getAttribute('class') || '';
+          const ariaLabel = await btn.getAttribute('aria-label') || '';
+          
+          console.log(`   Button: "${text}" | class: ${className.substring(0, 50)}`);
+          
+          // Look for UP/CALL/HIGHER buttons
+          if (direction === 'UP') {
+            if (text && (text.toUpperCase().includes('UP') || text.toUpperCase().includes('CALL') || 
+                text.includes('▲') || text.includes('↑') || text.toLowerCase().includes('higher'))) {
+              console.log(`✅ Found UP button: "${text}"`);
               await btn.click({ force: true });
-              console.log(`✅ ${direction} trade placed!`);
               await this.sleep(1000);
-              return true;
+              found = true;
+              break;
+            }
+          }
+          
+          // Look for DOWN/PUT/LOWER buttons
+          if (direction === 'DOWN') {
+            if (text && (text.toUpperCase().includes('DOWN') || text.toUpperCase().includes('PUT') || 
+                text.includes('▼') || text.includes('↓') || text.toLowerCase().includes('lower'))) {
+              console.log(`✅ Found DOWN button: "${text}"`);
+              await btn.click({ force: true });
+              await this.sleep(1000);
+              found = true;
+              break;
             }
           }
         } catch {}
       }
       
-      const buttonText = direction === 'UP' ? 'UP' : 'DOWN';
-      const clicked = await this.page.evaluate((text) => {
-        const buttons = document.querySelectorAll('button, [role="button"]');
-        for (const btn of buttons) {
-          if (btn.textContent && btn.textContent.trim() === text) {
-            btn.click();
-            return true;
-          }
-        }
-        return false;
-      }, buttonText);
-      
-      if (clicked) {
+      if (found) {
         console.log(`✅ ${direction} trade placed!`);
-        await this.sleep(1000);
         return true;
+      }
+      
+      // Try clicking by class patterns
+      const classPatterns = direction === 'UP' 
+        ? ['up', 'call', 'higher', 'rise', 'green', 'bull']
+        : ['down', 'put', 'lower', 'fall', 'red', 'bear'];
+      
+      for (const pattern of classPatterns) {
+        try {
+          const elements = await this.page.$$(`[class*="${pattern}"]`);
+          for (const el of elements) {
+            try {
+              const tagName = await el.evaluate(e => e.tagName);
+              if (tagName === 'BUTTON' || tagName === 'DIV') {
+                const visible = await el.isVisible();
+                if (visible) {
+                  console.log(`✅ Found ${direction} via class pattern: ${pattern}`);
+                  await el.click({ force: true });
+                  await this.sleep(1000);
+                  return true;
+                }
+              }
+            } catch {}
+          }
+        } catch {}
       }
       
       console.log('❌ Trade button not found');
@@ -187,9 +240,9 @@ export class Trader {
       const result = await this.page.evaluate(() => {
         const pageText = document.body.innerText.toLowerCase();
         
-        if (pageText.includes('won') || pageText.includes('win') || pageText.includes('profit')) {
+        if (pageText.includes('won') || pageText.includes('profit') || pageText.includes('success')) {
           return 'WIN';
-        } else if (pageText.includes('lost') || pageText.includes('loss') || pageText.includes('lose')) {
+        } else if (pageText.includes('lost') || pageText.includes('loss')) {
           return 'LOSS';
         }
         return 'UNKNOWN';
@@ -216,7 +269,6 @@ export class Trader {
           const el = document.querySelector(sel);
           if (el) {
             const text = el.textContent;
-            // Handle INR ₹ symbol
             const match = text.match(/[\d,]+\.?\d*/);
             if (match) {
               return parseFloat(match[0].replace(/,/g, ''));
