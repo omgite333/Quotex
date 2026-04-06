@@ -11,6 +11,10 @@ export async function generateSignal(candles) {
   const currentCandle = candles[candles.length - 1];
   const previousCandle = candles[candles.length - 2];
 
+  // Log current indicators
+  console.log(`📊 RSI: ${indicators.rsi?.toFixed(1) || 'N/A'} | EMA9: ${indicators.ema9?.toFixed(5) || 'N/A'} | EMA21: ${indicators.ema21?.toFixed(5) || 'N/A'}`);
+  console.log(`📊 MACD: ${indicators.macdHistogram?.toFixed(5) || 'N/A'} | BB Upper: ${indicators.bbUpper?.toFixed(5) || 'N/A'} | BB Lower: ${indicators.bbLower?.toFixed(5) || 'N/A'}`);
+
   return generateLocalSignal(indicators, currentCandle, previousCandle);
 }
 
@@ -18,83 +22,120 @@ function generateLocalSignal(indicators, currentCandle, previousCandle) {
   let direction = 'HOLD';
   let confidence = 50;
   const reasons = [];
+  let upScore = 0;
+  let downScore = 0;
 
   // RSI Analysis
   if (indicators.rsi) {
     if (indicators.rsi < 30) {
-      direction = 'UP';
-      confidence += 15;
+      upScore += 3;
       reasons.push(`RSI oversold (${indicators.rsi.toFixed(1)})`);
     } else if (indicators.rsi > 70) {
-      direction = 'DOWN';
-      confidence += 15;
+      downScore += 3;
       reasons.push(`RSI overbought (${indicators.rsi.toFixed(1)})`);
+    } else if (indicators.rsi < 45) {
+      upScore += 1;
+      reasons.push('RSI below 45');
+    } else if (indicators.rsi > 55) {
+      downScore += 1;
+      reasons.push('RSI above 55');
     }
   }
 
-  // EMA Crossover Analysis
+  // EMA Analysis
   if (indicators.ema9 && indicators.ema21) {
-    const emaCross = indicators.ema9 - indicators.ema21;
-    const prevEmaCross = indicators.ema9 - indicators.ema21; // Simplified
-    
     if (indicators.ema9 > indicators.ema21) {
-      confidence += 10;
-      reasons.push('EMA bullish (9 > 21)');
+      upScore += 2;
+      reasons.push('EMA bullish');
     } else {
-      confidence += 10;
-      reasons.push('EMA bearish (9 < 21)');
+      downScore += 2;
+      reasons.push('EMA bearish');
+    }
+    
+    // Price vs EMA
+    if (currentCandle.close > indicators.ema9) {
+      upScore += 1;
+    } else {
+      downScore += 1;
     }
   }
 
   // MACD Analysis
   if (indicators.macdHistogram !== undefined) {
     if (indicators.macdHistogram > 0) {
-      confidence += 10;
+      upScore += 2;
       reasons.push('MACD bullish');
     } else if (indicators.macdHistogram < 0) {
-      confidence += 10;
+      downScore += 2;
       reasons.push('MACD bearish');
     }
   }
 
   // Bollinger Bands Analysis
-  if (indicators.priceNearBBLower) {
-    direction = 'UP';
-    confidence += 10;
-    reasons.push('Near lower BB');
-  } else if (indicators.priceNearBBUpper) {
-    direction = 'DOWN';
-    confidence += 10;
-    reasons.push('Near upper BB');
-  }
-
-  // Price momentum (close vs open)
-  if (previousCandle && currentCandle) {
-    const momentum = (currentCandle.close - currentCandle.open) > 0;
-    if (momentum && direction !== 'DOWN') {
-      confidence += 5;
-      reasons.push('Bullish candle');
-    } else if (!momentum && direction !== 'UP') {
-      confidence += 5;
-      reasons.push('Bearish candle');
+  if (indicators.bbLower && indicators.bbUpper && currentCandle.close) {
+    const price = currentCandle.close;
+    const bbRange = indicators.bbUpper - indicators.bbLower;
+    const position = (price - indicators.bbLower) / (bbRange || 1);
+    
+    if (position < 0.2) {
+      upScore += 2;
+      reasons.push('Near lower BB');
+    } else if (position > 0.8) {
+      downScore += 2;
+      reasons.push('Near upper BB');
     }
   }
 
-  // Trend confirmation
+  // Candle momentum
+  if (previousCandle && currentCandle) {
+    const currentChange = currentCandle.close - currentCandle.open;
+    const previousChange = previousCandle.close - previousCandle.open;
+    
+    if (currentChange > 0) {
+      upScore += 1;
+    } else {
+      downScore += 1;
+    }
+    
+    // Consecutive bullish/bearish
+    if (currentChange > 0 && previousChange > 0) {
+      upScore += 1;
+      reasons.push('Consecutive bullish');
+    } else if (currentChange < 0 && previousChange < 0) {
+      downScore += 1;
+      reasons.push('Consecutive bearish');
+    }
+  }
+
+  // Trend
   if (indicators.trend) {
-    reasons.push(`${indicators.trend}`);
+    reasons.push(indicators.trend);
+  }
+
+  // Determine direction
+  if (upScore > downScore) {
+    direction = 'UP';
+    confidence = 50 + (upScore - downScore) * 8;
+  } else if (downScore > upScore) {
+    direction = 'DOWN';
+    confidence = 50 + (downScore - upScore) * 8;
   }
 
   // Clamp confidence
-  confidence = Math.min(95, Math.max(40, confidence));
+  confidence = Math.min(90, Math.max(45, confidence));
 
-  // Final direction with confidence threshold
-  const finalDirection = confidence >= settings.trading.minConfidence ? direction : 'HOLD';
+  // Check minimum confidence threshold
+  if (confidence < settings.trading.minConfidence) {
+    direction = 'HOLD';
+    reasons.push('Low confidence');
+  }
+
+  const finalReason = reasons.slice(0, 3).join(' + ') || 'Mixed signals';
 
   return {
-    direction: finalDirection,
+    direction,
     confidence,
-    reason: reasons.slice(0, 3).join(' + ')
+    reason: finalReason
   };
 }
 

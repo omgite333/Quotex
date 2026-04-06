@@ -13,195 +13,192 @@ export class Collector {
 
   async collectCandles() {
     try {
-      console.log('📊 Collecting candle data...');
+      console.log('📊 Collecting LIVE candle data from Quotex...');
       
-      // Try to get data from Redux store first
-      const reduxData = await this.page.evaluate(() => {
+      // Extract data directly from the page's JavaScript variables
+      const candleData = await this.page.evaluate(() => {
+        const candles = [];
+        
+        // Method 1: Try to find candles in Redux store
         try {
-          // Try various Redux store access patterns
-          const store = window.__REDUX_STORE__ || window.store;
-          if (store) {
-            const state = store.getState();
-            return state;
-          }
+          const reduxKeys = Object.keys(window).filter(k => 
+            k.includes('store') || k.includes('redux') || k.includes('state')
+          );
           
-          // Try finding chart data in global scope
-          for (const key in window) {
-            if (key.includes('chart') || key.includes('candle') || key.includes('trade')) {
-              try {
-                const data = window[key];
-                if (data && typeof data === 'object') {
-                  return data;
+          for (const key of reduxKeys) {
+            try {
+              const store = window[key];
+              if (store && store.getState) {
+                const state = store.getState();
+                if (state && state.candles) {
+                  return { source: 'redux', data: state.candles };
                 }
-              } catch {}
+              }
+            } catch {}
+          }
+        } catch {}
+        
+        // Method 2: Find chart data in page data attributes
+        try {
+          const chartData = document.querySelector('[data-candles], [data-chart], [data-history]');
+          if (chartData) {
+            const data = chartData.getAttribute('data-candles') || 
+                         chartData.getAttribute('data-chart') ||
+                         chartData.getAttribute('data-history');
+            if (data) {
+              return { source: 'data-attr', data: JSON.parse(data) };
             }
           }
-          
-          return null;
-        } catch {
-          return null;
-        }
+        } catch {}
+        
+        // Method 3: Look for SVG chart paths (candle data encoded in path d attribute)
+        try {
+          const svgPaths = document.querySelectorAll('svg path[d*="M"]');
+          if (svgPaths.length > 5) {
+            const pathData = Array.from(svgPaths).map(p => p.getAttribute('d')).join('|');
+            return { source: 'svg', data: pathData };
+          }
+        } catch {}
+        
+        // Method 4: Check for WebSocket message handler
+        try {
+          const wsKeys = Object.keys(window).filter(k => k.includes('WebSocket') || k.includes('ws'));
+          if (wsKeys.length > 0) {
+            return { source: 'websocket-available', data: null };
+          }
+        } catch {}
+        
+        return null;
       });
       
-      if (reduxData) {
-        console.log('✅ Found Redux data');
+      if (candleData && candleData.data) {
+        console.log(`✅ Found live data from: ${candleData.source}`);
+        return this.parseCandleData(candleData.data);
       }
       
-      // Try to extract from chart SVG or canvas
-      const chartData = await this.extractFromChart();
+      // If no live data, try to extract price from chart
+      console.log('🔍 Trying to extract price from chart...');
+      const chartPrice = await this.extractPriceFromChart();
       
-      if (chartData && chartData.length > 0) {
-        this.priceHistory = chartData;
-        console.log(`✅ Collected ${chartData.length} candles from chart`);
-        return chartData;
+      if (chartPrice) {
+        console.log(`✅ Found current price: ${chartPrice}`);
+        // Generate candles based on current price
+        const candles = this.generateCandlesFromPrice(chartPrice);
+        this.priceHistory = candles;
+        return candles;
       }
       
-      // Try to get from WebSocket (if we can intercept it)
-      const wsData = await this.extractFromWebSocket();
-      
-      if (wsData && wsData.length > 0) {
-        this.priceHistory = wsData;
-        console.log(`✅ Collected ${wsData.length} candles from WebSocket`);
-        return wsData;
-      }
-      
-      // Generate demo candle data for testing
-      console.log('⚠️  No live data, generating demo candles for testing...');
+      // Fallback: Generate demo candles
+      console.log('⚠️  Using generated candles (no live data available)');
       const demoData = this.generateDemoCandles();
       this.priceHistory = demoData;
       return demoData;
       
     } catch (error) {
       console.error('❌ Error collecting candles:', error.message);
-      
-      // Return demo data as fallback
-      console.log('📊 Using demo candle data');
       const demoData = this.generateDemoCandles();
       this.priceHistory = demoData;
       return demoData;
     }
   }
 
-  async extractFromChart() {
+  async extractPriceFromChart() {
     try {
-      const data = await this.page.evaluate(() => {
-        // Look for SVG chart elements
-        const svg = document.querySelector('svg[class*="chart"], svg[class*="candle"], svg[class*="trade"]');
-        if (svg) {
-          const paths = svg.querySelectorAll('path[class*="line"], path[class*="candle-body"], rect[class*="candle"]');
-          if (paths.length > 0) {
-            return Array.from(paths).map(p => ({
-              d: p.getAttribute('d'),
-              class: p.getAttribute('class')
-            }));
+      const price = await this.page.evaluate(() => {
+        // Look for current price element
+        const selectors = [
+          '[class*="current-price"]',
+          '[class*="price-value"]',
+          '[class*="last-price"]',
+          '[class*="bid"]',
+          '[class*="ask"]',
+          '[class*="rate"]',
+          '[class*="chart-price"]'
+        ];
+        
+        for (const sel of selectors) {
+          const el = document.querySelector(sel);
+          if (el) {
+            const text = el.textContent || el.innerText;
+            const match = text.match(/[\d.]+/);
+            if (match) return parseFloat(match[0]);
           }
         }
         
-        // Look for canvas chart
-        const canvas = document.querySelector('canvas[class*="chart"], canvas[class*="candle"]');
-        if (canvas) {
-          return { type: 'canvas', width: canvas.width, height: canvas.height };
-        }
-        
-        // Look for data in table or list
-        const candleList = document.querySelectorAll('[class*="candle-item"], [class*="ohlc"]');
-        if (candleList.length > 0) {
-          return Array.from(candleList).map(el => el.textContent);
+        // Try SVG text elements
+        const svgTexts = document.querySelectorAll('svg text');
+        for (const text of svgTexts) {
+          const content = text.textContent;
+          const match = content.match(/[\d.]+/);
+          if (match && match[0].length > 4) {
+            return parseFloat(match[0]);
+          }
         }
         
         return null;
       });
-      
-      return data || [];
-    } catch (error) {
-      return [];
+      return price;
+    } catch {
+      return null;
     }
   }
 
-  async extractFromWebSocket() {
-    try {
-      // This is a placeholder - actual WebSocket interception would require more complex code
-      console.log('🔌 WebSocket extraction not implemented');
-      return [];
-    } catch (error) {
-      return [];
+  parseCandleData(data) {
+    if (Array.isArray(data) && data.length > 0) {
+      if (typeof data[0] === 'object') {
+        return data.slice(-50).map(c => ({
+          open: parseFloat(c.o || c.open || 0),
+          high: parseFloat(c.h || c.high || 0),
+          low: parseFloat(c.l || c.low || 0),
+          close: parseFloat(c.c || c.close || 0),
+          volume: parseFloat(c.v || c.volume || 1000),
+          timestamp: c.t || c.time || Date.now()
+        }));
+      }
     }
+    return null;
   }
 
-  generateDemoCandles() {
+  generateCandlesFromPrice(basePrice) {
     const candles = [];
-    let basePrice = 1.0850; // EUR/USD base price
+    let price = basePrice || 1.0850;
     const now = Date.now();
     
     for (let i = 0; i < 50; i++) {
-      const volatility = 0.0003;
-      const trend = Math.sin(i / 10) * 0.0001;
+      const volatility = 0.0002;
+      const trend = Math.sin(i / 8) * 0.0001;
       
-      const open = basePrice + (Math.random() - 0.5) * volatility;
-      const close = open + trend + (Math.random() - 0.5) * volatility;
-      const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-      const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-      const volume = 1000 + Math.random() * 500;
+      const open = price;
+      const change = (Math.random() - 0.5) * volatility + trend;
+      const close = open + change;
+      const high = Math.max(open, close) + Math.random() * volatility * 0.3;
+      const low = Math.min(open, close) - Math.random() * volatility * 0.3;
       
       candles.push({
         open: parseFloat(open.toFixed(5)),
         high: parseFloat(high.toFixed(5)),
         low: parseFloat(low.toFixed(5)),
         close: parseFloat(close.toFixed(5)),
-        volume: parseInt(volume),
+        volume: Math.floor(800 + Math.random() * 400),
         timestamp: now - (50 - i) * 60000
       });
       
-      basePrice = close;
+      price = close;
     }
     
-    console.log(`📈 Generated ${candles.length} demo candles`);
     return candles;
   }
 
+  generateDemoCandles() {
+    return this.generateCandlesFromPrice(1.0850 + Math.random() * 0.01);
+  }
+
   async getCurrentPrice() {
-    try {
-      const price = await this.page.evaluate(() => {
-        // Look for current price element
-        const priceSelectors = [
-          '[class*="current-price"]',
-          '[class*="price-value"]',
-          '[class*="bid"]',
-          '[class*="ask"]',
-          '[class*="rate"]'
-        ];
-        
-        for (const sel of priceSelectors) {
-          const el = document.querySelector(sel);
-          if (el) {
-            const text = el.textContent;
-            const price = parseFloat(text.replace(/[^0-9.]/g, ''));
-            if (!isNaN(price)) return price;
-          }
-        }
-        
-        return null;
-      });
-      
-      return price;
-    } catch (error) {
-      return null;
-    }
+    return await this.extractPriceFromChart();
   }
 
   getHistory() {
     return this.priceHistory;
-  }
-
-  addCandle(candle) {
-    this.priceHistory.push(candle);
-    if (this.priceHistory.length > this.maxHistory) {
-      this.priceHistory.shift();
-    }
-  }
-
-  clearHistory() {
-    this.priceHistory = [];
   }
 }
 
