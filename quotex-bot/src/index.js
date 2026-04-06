@@ -1,4 +1,4 @@
-import { settings } from './config/settings.js';
+import { settings } from '../config/settings.js';
 import Login from './browser/login.js';
 import Trader from './browser/trader.js';
 import Collector from './data/collector.js';
