@@ -2,20 +2,13 @@ import { settings } from '../config/settings.js';
 import Login from './browser/login.js';
 import Trader from './browser/trader.js';
 import Collector from './data/collector.js';
-import History from './data/history.js';
 import { generateSignal } from './ai/signal.js';
-import { validateSignal } from './ai/validator.js';
-import riskManager from './risk/manager.js';
 import cron from 'node-cron';
 
-const CURRENCY = '₹'; // INR
+const CURRENCY = '₹';
 
-console.log('Loading settings...');
-console.log('Email:', settings.quotex.email ? '✓ configured' : '✗ NOT SET');
-console.log('Password:', settings.quotex.password ? '✓ configured' : '✗ NOT SET');
-
-console.log('\n╔════════════════════════════════════════╗');
-console.log('║    AI Quotex Trading Bot v1.0           ║');
+console.log('╔════════════════════════════════════════╗');
+console.log('║    AI Quotex Signal Bot v1.0           ║');
 console.log('╚════════════════════════════════════════╝\n');
 
 async function main() {
@@ -25,14 +18,12 @@ async function main() {
     collector: null,
     page: null,
     currentAsset: settings.trading.defaultAsset,
-    tradeCount: 0,
+    signalCount: 0,
 
     async start() {
-      console.log(`Mode:       ${settings.demo.enabled ? 'DEMO (Practice)' : 'LIVE'}`);
-      console.log(`Interval:   Every ${settings.trading.interval} minute(s)`);
       console.log(`Asset:      ${this.currentAsset}`);
-      console.log(`Currency:   INR (${CURRENCY})`);
-      console.log(`Min Confidence: ${settings.trading.minConfidence}%\n`);
+      console.log(`Currency:  INR (${CURRENCY})`);
+      console.log(`Interval:  Every ${settings.trading.interval} minute(s)\n`);
       
       if (!settings.quotex.email || !settings.quotex.password) {
         console.error('❌ ERROR: Email or password not set in .env!\n');
@@ -41,7 +32,7 @@ async function main() {
 
       try {
         await this.initialize();
-        await this.runTradingCycle();
+        await this.runSignalCycle();
       } catch (error) {
         console.error('\n❌ Fatal error:', error.message);
         process.exit(1);
@@ -49,138 +40,99 @@ async function main() {
     },
 
     async initialize() {
-      console.log('━'.repeat(40));
-      console.log('[1/4] Initializing browser...');
+      console.log('━'.repeat(45));
+      console.log('[1/3] Initializing browser...');
       const login = new Login();
       await login.init();
 
-      console.log('\n[2/4] Logging in to Quotex...');
+      console.log('\n[2/3] Logging in to Quotex...');
       await login.login();
 
       this.page = await login.getPage();
       this.trader = new Trader(this.page);
       this.collector = new Collector(this.page);
 
-      console.log('\n[3/4] Selecting demo account...');
-      await login.selectDemoAccount();
-      await this.trader.sleep(2000);
-
-      console.log('\n[4/4] Selecting asset and setting up...');
+      console.log('\n[3/3] Selecting asset...');
       await this.trader.selectAsset(this.currentAsset);
-      await this.trader.setExpiry(settings.trading.expiry);
-      await this.trader.sleep(1000);
       
-      console.log('\n' + '━'.repeat(40));
-      console.log('✅ BOT INITIALIZED SUCCESSFULLY!\n');
-      console.log(`${CURRENCY} Demo Balance: ${CURRENCY}${(await this.trader.getBalance())}\n`);
-      console.log('━'.repeat(40));
+      console.log('\n' + '━'.repeat(45));
+      console.log('✅ READY! Bot will show signals every 2 minutes.\n');
+      console.log('💡 Place your trade manually based on signals.\n');
+      console.log('━'.repeat(45) + '\n');
     },
 
-    async runTradingCycle() {
+    async runSignalCycle() {
       this.isRunning = true;
       
       const interval = settings.trading.interval;
-      console.log(`📅 Trade Interval: Every ${interval} minute(s)`);
-      console.log('🚀 Bot is running! Press Ctrl+C to stop.\n');
+      console.log(`📅 Signal Interval: Every ${interval} minute(s)\n`);
       
       cron.schedule(`*/${interval} * * * *`, async () => {
-        if (this.isRunning) await this.tradingStep();
+        if (this.isRunning) await this.generateSignal();
       });
 
-      await this.tradingStep();
+      await this.generateSignal();
     },
 
-    async tradingStep() {
-      this.tradeCount++;
-      console.log(`\n┌─ CYCLE #${this.tradeCount} ${'─'.repeat(30)}`);
+    async generateSignal() {
+      this.signalCount++;
+      
+      console.log(`\n${'═'.repeat(50)}`);
+      console.log(`📊 SIGNAL CHECK #${this.signalCount}`);
+      console.log(`⏰ ${new Date().toLocaleTimeString()}`);
+      console.log('═'.repeat(50));
       
       try {
-        const { canTrade, errors } = await riskManager.checkRiskLimits();
-        if (!canTrade) {
-          errors.forEach(e => console.warn(`⚠️  ${e}`));
-          return;
-        }
-
-        console.log('📊 Collecting price data...');
+        console.log('🔍 Collecting price data...');
         const candles = await this.collector.collectCandles();
         
-        if (!candles || candles.length < 20) {
-          console.log('⚠️  Insufficient data - skipping');
+        if (!candles || candles.length < 30) {
+          console.log('⚠️  Insufficient data - waiting for more candles...\n');
           return;
         }
         
         const latest = candles[candles.length - 1];
-        console.log(`📈 Price: ${latest.close} (H:${latest.high} L:${latest.low})`);
+        console.log(`📈 Price: ${latest.close}`);
+        console.log(`📊 Candles loaded: ${candles.length}`);
 
-        console.log('🤖 Analyzing market...');
+        console.log('\n🤖 Analyzing market...');
         const signal = await generateSignal(candles);
         
         if (!signal) {
-          console.log('⚠️  No signal generated');
+          console.log('⚠️  No signal generated\n');
           return;
         }
 
-        const signalEmoji = signal.direction === 'UP' ? '🟢' : signal.direction === 'DOWN' ? '🔴' : '⚪';
-        console.log(`\n${signalEmoji} SIGNAL: ${signal.direction.padEnd(6)} | Confidence: ${signal.confidence}%`);
-        console.log(`📝 Reason: ${signal.reason}`);
-
+        const emoji = signal.direction === 'UP' ? '🟢' : signal.direction === 'DOWN' ? '🔴' : '⚪';
+        
+        console.log('\n' + '┌' + '─'.repeat(48) + '┐');
+        console.log('│' + ' '.repeat(15) + '📊 SIGNAL 📊' + ' '.repeat(16) + '│');
+        console.log('├' + '─'.repeat(48) + '┤');
+        console.log(`│  Direction:   ${emoji} ${signal.direction.padEnd(25)}│`);
+        console.log(`│  Confidence:  ${signal.confidence}% ${' '.repeat(Math.max(0, 20 - signal.confidence.toString().length))}│`);
+        console.log('├' + '─'.repeat(48) + '┤');
+        console.log(`│  Indicators: ${signal.reason.substring(0, 40).padEnd(40)}│`);
+        if (signal.reason.length > 40) {
+          console.log(`│  ${signal.reason.substring(40).padEnd(46)}│`);
+        }
+        console.log('└' + '─'.repeat(48) + '┘');
+        
         if (signal.direction === 'HOLD') {
-          console.log('⏸️  Skipping - signal is HOLD');
-          return;
-        }
-
-        const stats = await History.getStats();
-        const validation = validateSignal(signal, stats);
-
-        if (!validation.valid) {
-          validation.errors.forEach(e => console.warn(`⚠️  ${e}`));
-          return;
-        }
-
-        const balance = await this.trader.getBalance() || 10000;
-        const amount = riskManager.getRecommendedAmount(balance, signal.confidence);
-
-        console.log(`${CURRENCY} Balance: ${CURRENCY}${balance} | Amount: ${CURRENCY}${amount}`);
-        console.log(`🔄 Opening ${signal.direction} position...`);
-
-        await this.trader.setTradeAmount(amount);
-        const success = await this.trader.placeTrade(signal.direction);
-
-        if (success) {
-          riskManager.recordTrade();
-          
-          console.log(`⏳ Waiting for ${settings.trading.expiry}min result...`);
-          const result = await this.trader.waitForResult();
-          const payout = result === 'WIN' ? amount * 1.85 : 0;
-
-          await History.saveTrade({ 
-            asset: this.currentAsset, 
-            direction: signal.direction, 
-            confidence: signal.confidence, 
-            reason: signal.reason, 
-            amount, 
-            expiry: settings.trading.expiry, 
-            result 
-          });
-          await History.updateStats(result, payout);
-
-          const newStats = await History.getStats();
-          const resultEmoji = result === 'WIN' ? '✅' : result === 'LOSS' ? '❌' : '⚠️';
-          console.log(`\n${resultEmoji} RESULT: ${result} | Payout: ${CURRENCY}${payout.toFixed(2)}`);
-          console.log(`📊 Win Rate: ${newStats.winRate} | Total P&L: ${CURRENCY}${newStats.totalProfit.toFixed(2)}`);
+          console.log('\n⏸️  WAIT - No clear signal. Do not trade.\n');
         } else {
-          console.log('❌ Trade placement failed');
+          console.log(`\n💡 PLACE ${signal.direction} TRADE NOW!`);
+          console.log(`💰 Amount: ${CURRENCY}${settings.trading.amount}\n`);
         }
+        
       } catch (error) {
         console.error('❌ Error:', error.message);
       }
-      
-      console.log(`└${'─'.repeat(43)}\n`);
     }
   };
 
   process.on('SIGINT', () => {
-    console.log('\n🛑 Stopping bot...');
+    console.log('\n\n🛑 Stopping bot...');
+    console.log(`📊 Total signals generated: ${bot.signalCount}`);
     bot.isRunning = false;
     process.exit(0);
   });

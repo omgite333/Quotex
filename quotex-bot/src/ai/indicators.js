@@ -1,5 +1,4 @@
 import { RSI, EMA, MACD, BollingerBands } from 'technicalindicators';
-import logger from '../logs/logger.js';
 
 export function calculateIndicators(candles) {
   if (!candles || candles.length < 30) {
@@ -43,18 +42,9 @@ export function calculateIndicators(candles) {
       momentum: macdHist > 0 ? 'BULLISH' : 'BEARISH'
     };
   } catch (error) {
-    logger.error('Indicator calculation error:', error.message);
+    console.log('⚠️  Indicator error:', error.message);
     return {};
   }
 }
 
-export function getVolumeAnalysis(candles) {
-  if (candles.length < 20) return { isSpike: false, ratio: 1 };
-  
-  const avgVolume = candles.slice(-20).reduce((a, c) => a + (c.volume || 1), 0) / 20;
-  const currentVolume = candles[candles.length - 1].volume || 1;
-  
-  return { isSpike: currentVolume > avgVolume * 1.5, ratio: currentVolume / avgVolume };
-}
-
-export default { calculateIndicators, getVolumeAnalysis };
+export default { calculateIndicators };
