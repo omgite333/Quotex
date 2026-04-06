@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer-core';
-import { settings } from '../../config/settings.js';
-import logger from '../logs/logger.js';
+import { settings } from '../config/settings.js';
+import fs from 'fs';
+import path from 'path';
 
 export class Login {
   constructor() {
@@ -9,27 +10,34 @@ export class Login {
   }
 
   async init() {
-    logger.info('Initializing browser...');
+    console.log('🔍 Initializing browser...');
     
-    const executablePaths = [
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe'
-    ];
+    let executablePath = process.env.CHROME_PATH;
 
-    let executablePath = executablePaths.find(p => {
-      try {
-        require('fs').accessSync(p);
-        return true;
-      } catch { return false; }
-    });
+    if (!executablePath || !fs.existsSync(executablePath)) {
+      const possiblePaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ];
+      
+      for (const p of possiblePaths) {
+        if (p && fs.existsSync(p)) {
+          executablePath = p;
+          break;
+        }
+      }
+    }
 
-    if (!executablePath) {
-      logger.error('Chrome not found. Please install Chrome or set CHROME_PATH');
+    if (!executablePath || !fs.existsSync(executablePath)) {
+      console.error('❌ Chrome not found!');
+      console.log('Please either:');
+      console.log('1. Install Chrome browser');
+      console.log('2. Set CHROME_PATH in .env file');
       throw new Error('Chrome executable not found');
     }
 
-    logger.info(`Using Chrome at: ${executablePath}`);
+    console.log(`✅ Found Chrome at: ${executablePath}`);
 
     this.browser = await puppeteer.launch({
       headless: false,
@@ -43,43 +51,68 @@ export class Login {
     const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
     await this.page.setUserAgent(userAgent);
     
-    logger.info('Browser initialized');
+    console.log('✅ Browser initialized successfully');
     return this;
   }
 
   async login() {
     try {
-      logger.info('Navigating to Quotex login page...');
+      console.log('🌐 Navigating to Quotex login page...');
       await this.page.goto(settings.quotex.url, { waitUntil: 'networkidle2', timeout: 60000 });
       
-      await this.page.waitForTimeout(2000);
+      await this.page.waitForTimeout(3000);
       
-      const emailSelector = await this.page.$('input[type="email"], input[name="email"], input[placeholder*="email" i], input[placeholder*="mail" i]');
-      const passwordSelector = await this.page.$('input[type="password"], input[name="password"]');
+      console.log('🔍 Looking for login form...');
       
-      if (emailSelector && passwordSelector) {
-        logger.info('Found login form, entering credentials...');
-        await emailSelector.type(settings.quotex.email, { delay: 50 });
-        await this.page.waitForTimeout(500);
-        await passwordSelector.type(settings.quotex.password, { delay: 50 });
-        await this.page.waitForTimeout(500);
-        
-        const submitBtn = await this.page.$('button[type="submit"], button:has-text("Sign in"), button:has-text("Log in"), button:has-text("Login")');
-        if (submitBtn) {
-          await submitBtn.click();
+      const selectors = [
+        'input[type="email"]',
+        'input[name="email"]',
+        'input[placeholder*="email" i]',
+        'input[placeholder*="mail" i]'
+      ];
+      
+      let emailInput = null;
+      for (const sel of selectors) {
+        emailInput = await this.page.$(sel);
+        if (emailInput) {
+          console.log(`✅ Found email input: ${sel}`);
+          break;
         }
-        
-        await this.page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
-        logger.info('Login submitted!');
-      } else {
-        logger.warn('Login form not found - page may have changed');
-        await this.page.screenshot({ path: 'debug-login.png' });
+      }
+
+      if (!emailInput) {
+        console.log('⚠️  Email input not found. Taking screenshot...');
+        await this.page.screenshot({ path: 'debug-login.png', fullPage: true });
+        throw new Error('Email input not found on page');
       }
       
+      console.log('✏️  Entering email...');
+      await emailInput.type(settings.quotex.email, { delay: 100 });
+      await this.page.waitForTimeout(500);
+      
+      const passwordInput = await this.page.$('input[type="password"]');
+      if (passwordInput) {
+        console.log('✏️  Entering password...');
+        await passwordInput.type(settings.quotex.password, { delay: 100 });
+        await this.page.waitForTimeout(500);
+        
+        const submitBtn = await this.page.$('button[type="submit"]');
+        if (submitBtn) {
+          console.log('🖱️  Clicking submit button...');
+          await submitBtn.click();
+        }
+      }
+      
+      console.log('⏳ Waiting for login...');
+      await this.page.waitForTimeout(5000);
+      
+      console.log('✅ Login completed');
       return true;
     } catch (error) {
-      logger.error('Login failed:', error.message);
-      await this.page.screenshot({ path: 'debug-error.png' }).catch(() => {});
+      console.error('❌ Login failed:', error.message);
+      try {
+        await this.page.screenshot({ path: 'debug-error.png', fullPage: true });
+      } catch {}
       throw error;
     }
   }
@@ -95,4 +128,4 @@ export class Login {
   }
 }
 
-export default new Login();
+export default Login;

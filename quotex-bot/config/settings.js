@@ -1,6 +1,8 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+console.log('Loading settings...');
+
 export const settings = {
   quotex: {
     email: process.env.QUOTEX_EMAIL || '',
@@ -27,3 +29,7 @@ export const settings = {
     enabled: true
   }
 };
+
+console.log('Settings loaded');
+console.log('Email:', settings.quotex.email ? '✓ configured' : '✗ NOT SET');
+console.log('Password:', settings.quotex.password ? '✓ configured' : '✗ NOT SET');
