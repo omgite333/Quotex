@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core';
-import { settings } from '../config/settings.js';
+import { settings } from '../../config/settings.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,6 +7,10 @@ export class Login {
   constructor() {
     this.browser = null;
     this.page = null;
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async init() {
@@ -60,7 +64,7 @@ export class Login {
       console.log('🌐 Navigating to Quotex login page...');
       await this.page.goto(settings.quotex.url, { waitUntil: 'networkidle2', timeout: 60000 });
       
-      await this.page.waitForTimeout(3000);
+      await this.sleep(3000);
       
       console.log('🔍 Looking for login form...');
       
@@ -88,13 +92,13 @@ export class Login {
       
       console.log('✏️  Entering email...');
       await emailInput.type(settings.quotex.email, { delay: 100 });
-      await this.page.waitForTimeout(500);
+      await this.sleep(500);
       
       const passwordInput = await this.page.$('input[type="password"]');
       if (passwordInput) {
         console.log('✏️  Entering password...');
         await passwordInput.type(settings.quotex.password, { delay: 100 });
-        await this.page.waitForTimeout(500);
+        await this.sleep(500);
         
         const submitBtn = await this.page.$('button[type="submit"]');
         if (submitBtn) {
@@ -104,7 +108,7 @@ export class Login {
       }
       
       console.log('⏳ Waiting for login...');
-      await this.page.waitForTimeout(5000);
+      await this.sleep(5000);
       
       console.log('✅ Login completed');
       return true;
