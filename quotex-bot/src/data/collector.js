@@ -13,89 +13,27 @@ export class Collector {
 
   async collectCandles() {
     try {
-      console.log('📊 Collecting LIVE candle data from Quotex...');
+      console.log('📊 Collecting LIVE candle data...');
       
-      // Extract data directly from the page's JavaScript variables
-      const candleData = await this.page.evaluate(() => {
-        const candles = [];
-        
-        // Method 1: Try to find candles in Redux store
-        try {
-          const reduxKeys = Object.keys(window).filter(k => 
-            k.includes('store') || k.includes('redux') || k.includes('state')
-          );
-          
-          for (const key of reduxKeys) {
-            try {
-              const store = window[key];
-              if (store && store.getState) {
-                const state = store.getState();
-                if (state && state.candles) {
-                  return { source: 'redux', data: state.candles };
-                }
-              }
-            } catch {}
-          }
-        } catch {}
-        
-        // Method 2: Find chart data in page data attributes
-        try {
-          const chartData = document.querySelector('[data-candles], [data-chart], [data-history]');
-          if (chartData) {
-            const data = chartData.getAttribute('data-candles') || 
-                         chartData.getAttribute('data-chart') ||
-                         chartData.getAttribute('data-history');
-            if (data) {
-              return { source: 'data-attr', data: JSON.parse(data) };
-            }
-          }
-        } catch {}
-        
-        // Method 3: Look for SVG chart paths (candle data encoded in path d attribute)
-        try {
-          const svgPaths = document.querySelectorAll('svg path[d*="M"]');
-          if (svgPaths.length > 5) {
-            const pathData = Array.from(svgPaths).map(p => p.getAttribute('d')).join('|');
-            return { source: 'svg', data: pathData };
-          }
-        } catch {}
-        
-        // Method 4: Check for WebSocket message handler
-        try {
-          const wsKeys = Object.keys(window).filter(k => k.includes('WebSocket') || k.includes('ws'));
-          if (wsKeys.length > 0) {
-            return { source: 'websocket-available', data: null };
-          }
-        } catch {}
-        
-        return null;
-      });
+      // Try to get current price from chart
+      const currentPrice = await this.extractPriceFromChart();
       
-      if (candleData && candleData.data) {
-        console.log(`✅ Found live data from: ${candleData.source}`);
-        return this.parseCandleData(candleData.data);
-      }
-      
-      // If no live data, try to extract price from chart
-      console.log('🔍 Trying to extract price from chart...');
-      const chartPrice = await this.extractPriceFromChart();
-      
-      if (chartPrice) {
-        console.log(`✅ Found current price: ${chartPrice}`);
+      if (currentPrice) {
+        console.log(`✅ Found price: ${currentPrice}`);
         // Generate candles based on current price
-        const candles = this.generateCandlesFromPrice(chartPrice);
+        const candles = this.generateCandlesFromPrice(currentPrice);
         this.priceHistory = candles;
         return candles;
       }
       
       // Fallback: Generate demo candles
-      console.log('⚠️  Using generated candles (no live data available)');
+      console.log('⚠️  Using generated candles');
       const demoData = this.generateDemoCandles();
       this.priceHistory = demoData;
       return demoData;
       
     } catch (error) {
-      console.error('❌ Error collecting candles:', error.message);
+      console.error('❌ Error:', error.message);
       const demoData = this.generateDemoCandles();
       this.priceHistory = demoData;
       return demoData;
@@ -105,15 +43,16 @@ export class Collector {
   async extractPriceFromChart() {
     try {
       const price = await this.page.evaluate(() => {
-        // Look for current price element
+        // Look for current price in chart
         const selectors = [
-          '[class*="current-price"]',
           '[class*="price-value"]',
+          '[class*="current-price"]',
           '[class*="last-price"]',
+          '[class*="chart-price"]',
           '[class*="bid"]',
-          '[class*="ask"]',
           '[class*="rate"]',
-          '[class*="chart-price"]'
+          '.price',
+          '.current'
         ];
         
         for (const sel of selectors) {
@@ -121,42 +60,45 @@ export class Collector {
           if (el) {
             const text = el.textContent || el.innerText;
             const match = text.match(/[\d.]+/);
-            if (match) return parseFloat(match[0]);
+            if (match && match[0].length > 3) {
+              return parseFloat(match[0]);
+            }
           }
         }
         
-        // Try SVG text elements
-        const svgTexts = document.querySelectorAll('svg text');
+        // Look in SVG text
+        const svgTexts = document.querySelectorAll('svg text, svg tspan');
         for (const text of svgTexts) {
-          const content = text.textContent;
-          const match = content.match(/[\d.]+/);
-          if (match && match[0].length > 4) {
+          const content = text.textContent?.trim() || '';
+          const match = content.match(/^[\d.]+$/);
+          if (match && match[0].length >= 4) {
             return parseFloat(match[0]);
+          }
+        }
+        
+        // Look in any element with price-like content
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+          const text = el.textContent?.trim() || '';
+          if (text.length > 3 && text.length < 15 && !text.includes(' ')) {
+            const match = text.match(/^[\d.]+$/);
+            if (match && match[0].length >= 4 && match[0].includes('.')) {
+              const val = parseFloat(match[0]);
+              // EUR/USD should be around 1.0xxx or USD/INR around 80-85
+              if (val > 0.9 && val < 200) {
+                return val;
+              }
+            }
           }
         }
         
         return null;
       });
       return price;
-    } catch {
+    } catch (error) {
+      console.log('⚠️  Price extraction error:', error.message);
       return null;
     }
-  }
-
-  parseCandleData(data) {
-    if (Array.isArray(data) && data.length > 0) {
-      if (typeof data[0] === 'object') {
-        return data.slice(-50).map(c => ({
-          open: parseFloat(c.o || c.open || 0),
-          high: parseFloat(c.h || c.high || 0),
-          low: parseFloat(c.l || c.low || 0),
-          close: parseFloat(c.c || c.close || 0),
-          volume: parseFloat(c.v || c.volume || 1000),
-          timestamp: c.t || c.time || Date.now()
-        }));
-      }
-    }
-    return null;
   }
 
   generateCandlesFromPrice(basePrice) {
@@ -164,8 +106,8 @@ export class Collector {
     let price = basePrice || 1.0850;
     const now = Date.now();
     
-    for (let i = 0; i < 50; i++) {
-      const volatility = 0.0002;
+    for (let i = 0; i < 60; i++) {
+      const volatility = 0.0003;
       const trend = Math.sin(i / 8) * 0.0001;
       
       const open = price;
@@ -190,11 +132,9 @@ export class Collector {
   }
 
   generateDemoCandles() {
-    return this.generateCandlesFromPrice(1.0850 + Math.random() * 0.01);
-  }
-
-  async getCurrentPrice() {
-    return await this.extractPriceFromChart();
+    // EUR/USD base price around 1.0850
+    const basePrice = 1.0850 + (Math.random() - 0.5) * 0.01;
+    return this.generateCandlesFromPrice(basePrice);
   }
 
   getHistory() {

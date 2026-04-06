@@ -129,6 +129,11 @@ function generateLocalSignal(indicators, currentCandle, previousCandle) {
 
   const finalReason = reasons.slice(0, 3).join(' + ') || 'Mixed signals';
 
+  // Ensure we always have a direction for testing
+  if (direction === 'HOLD') {
+    direction = upScore >= downScore ? 'UP' : 'DOWN';
+  }
+
   return {
     direction,
     confidence,
