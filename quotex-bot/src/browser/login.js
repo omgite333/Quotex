@@ -35,9 +35,6 @@ export class Login {
 
     if (!executablePath || !fs.existsSync(executablePath)) {
       console.error('❌ Chrome not found!');
-      console.log('Please either:');
-      console.log('1. Install Chrome browser');
-      console.log('2. Set CHROME_PATH in .env file');
       throw new Error('Chrome executable not found');
     }
 
@@ -62,62 +59,91 @@ export class Login {
   async login() {
     try {
       console.log('🌐 Navigating to Quotex login page...');
-      await this.page.goto(settings.quotex.url, { waitUntil: 'networkidle2', timeout: 60000 });
+      await this.page.goto(settings.quotex.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
       
-      await this.sleep(3000);
+      await this.sleep(2000);
       
       console.log('🔍 Looking for login form...');
       
-      const selectors = [
-        'input[type="email"]',
-        'input[name="email"]',
-        'input[placeholder*="email" i]',
-        'input[placeholder*="mail" i]'
-      ];
+      // Find and fill email
+      const emailInput = await this.page.waitForSelector('input[type="email"], input[name="email"], input[placeholder*="email" i]', { timeout: 10000 });
+      await emailInput.click({ clickCount: 3 });
+      await emailInput.type(settings.quotex.email, { delay: 50 });
+      console.log('✅ Email entered');
       
-      let emailInput = null;
-      for (const sel of selectors) {
-        emailInput = await this.page.$(sel);
-        if (emailInput) {
-          console.log(`✅ Found email input: ${sel}`);
-          break;
-        }
-      }
-
-      if (!emailInput) {
-        console.log('⚠️  Email input not found. Taking screenshot...');
-        await this.page.screenshot({ path: 'debug-login.png', fullPage: true });
-        throw new Error('Email input not found on page');
-      }
-      
-      console.log('✏️  Entering email...');
-      await emailInput.type(settings.quotex.email, { delay: 100 });
       await this.sleep(500);
       
+      // Find and fill password
       const passwordInput = await this.page.$('input[type="password"]');
       if (passwordInput) {
-        console.log('✏️  Entering password...');
-        await passwordInput.type(settings.quotex.password, { delay: 100 });
-        await this.sleep(500);
-        
-        const submitBtn = await this.page.$('button[type="submit"]');
-        if (submitBtn) {
-          console.log('🖱️  Clicking submit button...');
-          await submitBtn.click();
-        }
+        await passwordInput.click({ clickCount: 3 });
+        await passwordInput.type(settings.quotex.password, { delay: 50 });
+        console.log('✅ Password entered');
       }
       
-      console.log('⏳ Waiting for login...');
+      await this.sleep(500);
+      
+      // Click submit button
+      const submitBtn = await this.page.$('button[type="submit"]');
+      if (submitBtn) {
+        console.log('🖱️  Clicking login button...');
+        await submitBtn.click();
+      } else {
+        // Try pressing Enter
+        await this.page.keyboard.press('Enter');
+      }
+      
+      console.log('⏳ Waiting for login to complete...');
       await this.sleep(5000);
       
-      console.log('✅ Login completed');
+      // Check if we're on the login page still
+      const currentUrl = this.page.url();
+      console.log(`🌐 Current URL: ${currentUrl}`);
+      
+      // Wait for dashboard elements
+      try {
+        await this.page.waitForSelector('[class*="chart"], [class*="trade"], [class*="asset"]', { timeout: 10000 });
+        console.log('✅ Login successful - Dashboard loaded');
+      } catch {
+        console.log('⚠️  May not be logged in yet, continuing anyway...');
+      }
+      
       return true;
     } catch (error) {
       console.error('❌ Login failed:', error.message);
-      try {
-        await this.page.screenshot({ path: 'debug-error.png', fullPage: true });
-      } catch {}
+      await this.page.screenshot({ path: 'debug-login.png', fullPage: true });
+      console.log('📸 Screenshot saved as debug-login.png');
       throw error;
+    }
+  }
+
+  async selectDemoAccount() {
+    try {
+      console.log('🎮 Looking for demo account...');
+      
+      // Look for demo toggle or button
+      const demoSelectors = [
+        'button:has-text("Demo")',
+        '[class*="demo"]',
+        '[class*="balance"] button',
+        'text="Demo"'
+      ];
+      
+      for (const sel of demoSelectors) {
+        try {
+          await this.page.waitForSelector(sel, { timeout: 3000 });
+          await this.page.click(sel);
+          console.log('✅ Demo account selected');
+          await this.sleep(1000);
+          return true;
+        } catch {}
+      }
+      
+      console.log('⚠️  Demo selector not found, may already be on demo');
+      return false;
+    } catch (error) {
+      console.log('⚠️  Demo selection skipped:', error.message);
+      return false;
     }
   }
 

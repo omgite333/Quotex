@@ -1,8 +1,7 @@
-import logger from '../logs/logger.js';
 import { settings } from '../../config/settings.js';
 import History from '../data/history.js';
 
-export class RiskManager {
+class RiskManager {
   constructor() {
     this.isPaused = false;
     this.pauseUntil = null;
@@ -15,21 +14,22 @@ export class RiskManager {
 
     if (stats.consecutiveLosses >= settings.trading.maxConsecutiveLosses) {
       this.pause(30);
-      errors.push(`Paused for 30 mins: ${stats.consecutiveLosses} consecutive losses`);
+      errors.push(`Paused 30min: ${stats.consecutiveLosses} consecutive losses`);
     }
 
     if (Math.abs(stats.totalProfit) >= settings.trading.dailyLossLimit) {
       this.pause(1440);
-      errors.push(`Daily loss limit hit: $${Math.abs(stats.totalProfit)}`);
+      errors.push(`Daily limit hit: $${Math.abs(stats.totalProfit)}`);
     }
 
     if (this.isPaused && this.pauseUntil && Date.now() < this.pauseUntil) {
       const remaining = Math.ceil((this.pauseUntil - Date.now()) / 60000);
-      errors.push(`Bot paused: ${remaining} minutes remaining`);
+      errors.push(`Bot paused: ${remaining} min remaining`);
     }
 
-    if (this.hourlyTrades.length >= settings.trading.maxTradesPerHour) {
-      errors.push('Hourly trade limit reached');
+    const tradesThisHour = this.getTradesThisHour();
+    if (tradesThisHour >= settings.trading.maxTradesPerHour) {
+      errors.push(`Hourly limit: ${tradesThisHour}/${settings.trading.maxTradesPerHour}`);
     }
 
     return {
@@ -41,13 +41,13 @@ export class RiskManager {
   pause(minutes) {
     this.isPaused = true;
     this.pauseUntil = Date.now() + (minutes * 60000);
-    logger.warn(`Bot paused for ${minutes} minutes`);
+    console.log(`⏸️  Bot paused for ${minutes} minutes`);
   }
 
   resume() {
     this.isPaused = false;
     this.pauseUntil = null;
-    logger.info('Bot resumed');
+    console.log('▶️  Bot resumed');
   }
 
   recordTrade() {
@@ -60,12 +60,16 @@ export class RiskManager {
     this.hourlyTrades = this.hourlyTrades.filter(t => t > oneHourAgo);
   }
 
+  getTradesThisHour() {
+    this.cleanupOldTrades();
+    return this.hourlyTrades.length;
+  }
+
   getRecommendedAmount(balance, confidence) {
     let percent = 1;
     
     if (confidence > 80) percent = 2;
     if (confidence > 90) percent = 3;
-    
     if (balance < 50) percent = 0.5;
     
     const amount = balance * (percent / 100);

@@ -1,11 +1,18 @@
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
+import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dbPath = path.join(process.cwd(), 'data', 'trades.json');
 
-const db = new Low(new JSONFile('data/trades.json'), {
+// Ensure data directory exists
+const dataDir = path.dirname(dbPath);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const adapter = new JSONFile(dbPath);
+const db = new Low(adapter, {
   trades: [],
   stats: {
     totalTrades: 0,
@@ -19,7 +26,7 @@ const db = new Low(new JSONFile('data/trades.json'), {
 
 await db.read();
 
-export class History {
+class History {
   static async saveTrade(trade) {
     db.data.trades.push({
       ...trade,
@@ -37,7 +44,7 @@ export class History {
       stats.consecutiveWins++;
       stats.consecutiveLosses = 0;
       stats.totalProfit += profit;
-    } else {
+    } else if (result === 'LOSS') {
       stats.losses++;
       stats.consecutiveLosses++;
       stats.consecutiveWins = 0;
@@ -49,29 +56,17 @@ export class History {
   }
 
   static async getStats() {
+    const stats = db.data.stats;
     return {
-      ...db.data.stats,
-      winRate: db.data.stats.totalTrades > 0 
-        ? (db.data.stats.wins / db.data.stats.totalTrades * 100).toFixed(2) + '%'
+      ...stats,
+      winRate: stats.totalTrades > 0 
+        ? (stats.wins / stats.totalTrades * 100).toFixed(1) + '%'
         : '0%'
     };
   }
 
   static async getRecentTrades(count = 20) {
     return db.data.trades.slice(-count);
-  }
-
-  static async resetDaily() {
-    const today = new Date().toDateString();
-    const lastTradeDate = db.data.trades.length > 0 
-      ? new Date(db.data.trades[db.data.trades.length - 1].timestamp).toDateString()
-      : null;
-    
-    if (lastTradeDate !== today) {
-      db.data.dailyProfit = 0;
-      db.data.dailyTrades = 0;
-      await db.write();
-    }
   }
 }
 
