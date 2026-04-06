@@ -7,7 +7,7 @@ export const settings = {
   quotex: {
     email: process.env.QUOTEX_EMAIL || '',
     password: process.env.QUOTEX_PASSWORD || '',
-    url: 'https://quotex.com/en/login'
+    url: 'https://qxbroker.com/en/sign-in'
   },
   trading: {
     amount: parseFloat(process.env.TRADE_AMOUNT) || 1,
